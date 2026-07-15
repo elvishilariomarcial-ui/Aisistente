@@ -1,0 +1,6 @@
+flask
+google-genai
+gTTS
+vosk
+requests
+gunicorn
