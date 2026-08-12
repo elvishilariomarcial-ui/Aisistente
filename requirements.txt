@@ -1,6 +1,4 @@
 flask
-google-genai
+google-generativeai
 gTTS
-vosk
-requests
-gunicorn
+SpeechRecognition
