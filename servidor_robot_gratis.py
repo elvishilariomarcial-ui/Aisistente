@@ -1,4 +1,4 @@
-        import os
+import os
 import io
 from flask import Flask, request, send_file
 import google.generativeai as genai
