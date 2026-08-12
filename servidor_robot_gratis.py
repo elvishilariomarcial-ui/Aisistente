@@ -7,27 +7,15 @@ import speech_recognition as sr
 
 app = Flask(__name__)
 
+# Configuración de la API Key de Gemini
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-def obtener_modelo_activo():
-    try:
-        modelos = genai.list_models()
-        for m in modelos:
-            if 'generateContent' in m.supported_generation_methods:
-                try:
-                    nombre = m.name
-                    m_test = genai.GenerativeModel(nombre)
-                    m_test.generate_content("hola")
-                    return m_test
-                except Exception:
-                    continue
-    except Exception as e:
-        print(f"[SERVIDOR] Error al listar modelos: {e}")
-    return genai.GenerativeModel('gemini-2.0-flash')
+# Usamos directamente el modelo rápido e ideal para asistentes
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 # ------------------------------------------------------------------
-# INTERFAZ WEB PARA EL CELULAR (MICRÓFONO Y TECLADO)
+# INTERFAZ WEB PARA EL CELULAR
 # ------------------------------------------------------------------
 @app.route('/', methods=['GET'])
 def pagina_inicio():
@@ -40,7 +28,7 @@ def pagina_inicio():
         <title>Asistente Robot</title>
         <style>
             body { font-family: Arial, sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
-            input { width: 85%; padding: 12px; font-size: 16px; border-radius: 8px; border: none; margin: 10px 0; }
+            input { width: 85%; padding: 12px; font-size: 16px; border-radius: 8px; border: none; margin: 10px 0; box-sizing: border-box; }
             button { background: #007bff; color: white; border: none; padding: 15px 20px; font-size: 16px; border-radius: 8px; margin: 5px; cursor: pointer; }
             button:active { background: #0056b3; }
             #status { font-weight: bold; margin-top: 15px; color: #00ffcc; }
@@ -70,7 +58,8 @@ def pagina_inicio():
                         audio.play();
                         document.getElementById('status').innerText = '🔊 Reproduciendo respuesta...';
                     } else {
-                        document.getElementById('status').innerText = '❌ Error en el servidor';
+                        let errJson = await res.json().catch(() => ({}));
+                        document.getElementById('status').innerText = '❌ Error: ' + (errJson.error || 'Servidor HTTP ' + res.status);
                     }
                 } catch(e) {
                     document.getElementById('status').innerText = '❌ Error de conexion: ' + e;
@@ -110,7 +99,7 @@ def asistente():
         else:
             audio_bytes = request.data
             if not audio_bytes:
-                return {"error": "Sin datos"}, 400
+                return {"error": "Sin datos de audio"}, 400
             recognizer = sr.Recognizer()
             audio_file = io.BytesIO(audio_bytes)
             with sr.AudioFile(audio_file) as source:
@@ -118,12 +107,16 @@ def asistente():
                 pregunta_texto = recognizer.recognize_google(audio_data, language="es-ES")
 
         if not pregunta_texto:
-            return {"error": "Pregunta invalida"}, 400
+            return {"error": "Pregunta vacia o no entendida"}, 400
 
-        model = obtener_modelo_activo()
+        print(f"[SERVIDOR] Pregunta recibida: {pregunta_texto}")
+        
+        # Generar respuesta con Gemini
         response = model.generate_content(pregunta_texto)
         texto_respuesta = response.text
+        print(f"[SERVIDOR] Respuesta Gemini: {texto_respuesta}")
 
+        # Convertir texto a audio con gTTS
         tts = gTTS(text=texto_respuesta, lang='es')
         fp = io.BytesIO()
         tts.write_to_fp(fp)
@@ -132,6 +125,7 @@ def asistente():
         return send_file(fp, mimetype="audio/mpeg")
 
     except Exception as e:
+        print(f"[ERROR SERVIDOR]: {e}")
         return {"error": str(e)}, 500
 
 if __name__ == '__main__':
