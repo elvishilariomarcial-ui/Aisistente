@@ -7,12 +7,26 @@ import speech_recognition as sr
 
 app = Flask(__name__)
 
-# Configuración de la API Key de Gemini
+# Configuracion de la API Key de Gemini
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Usamos directamente el modelo rápido e ideal para asistentes
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Lista de modelos compatibles en orden de preferencia
+MODELOS_IA = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest']
+
+def generar_respuesta_gemini(texto):
+    ultimo_error = None
+    for modelo_nombre in MODELOS_IA:
+        try:
+            model = genai.GenerativeModel(modelo_nombre)
+            response = model.generate_content(texto)
+            print(f"[SERVIDOR] Respuesta exitosa con modelo: {modelo_nombre}")
+            return response.text
+        except Exception as e:
+            ultimo_error = e
+            print(f"[SERVIDOR] Fallo modelo {modelo_nombre}: {e}")
+            continue
+    raise ultimo_error
 
 # ------------------------------------------------------------------
 # INTERFAZ WEB PARA EL CELULAR
@@ -111,9 +125,8 @@ def asistente():
 
         print(f"[SERVIDOR] Pregunta recibida: {pregunta_texto}")
         
-        # Generar respuesta con Gemini
-        response = model.generate_content(pregunta_texto)
-        texto_respuesta = response.text
+        # Generar respuesta con sistema de respaldo
+        texto_respuesta = generar_respuesta_gemini(pregunta_texto)
         print(f"[SERVIDOR] Respuesta Gemini: {texto_respuesta}")
 
         # Convertir texto a audio con gTTS
