@@ -1,125 +1,72 @@
-
 import os
 import io
-import wave
-import json
-import zipfile
-import requests as req_lib
 from flask import Flask, request, send_file
-from google import genai
+import google.generativeai as genai
 from gtts import gTTS
-from vosk import Model, KaldiRecognizer
+import speech_recognition as sr
 
 app = Flask(__name__)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_CLAVE_GEMINI_AQUI")
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+# Configuración de la API Key de Gemini
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
+genai.configure(api_key=GEMINI_API_KEY)
 
-VOSK_MODEL_PATH = "model"
-VOSK_MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip"
-VOSK_ZIP_NAME = "vosk-model-small-es-0.42"
-
-def descargar_modelo_si_falta():
-    if os.path.isdir(VOSK_MODEL_PATH):
-        print("Modelo Vosk ya existe, no se descarga de nuevo.")
-        return
-
-    print("Descargando modelo de Vosk en español (una sola vez)...")
-    respuesta = req_lib.get(VOSK_MODEL_URL, stream=True)
-    respuesta.raise_for_status()
-
-    zip_path = "modelo_temp.zip"
-    with open(zip_path, "wb") as f:
-        for chunk in respuesta.iter_content(chunk_size=8192):
-            f.write(chunk)
-
-    print("Descomprimiendo modelo...")
-    with zipfile.ZipFile(zip_path, "r") as zip_ref:
-        zip_ref.extractall(".")
-
-    os.rename(VOSK_ZIP_NAME, VOSK_MODEL_PATH)
-    os.remove(zip_path)
-    print("Modelo Vosk listo.")
-
-descargar_modelo_si_falta()
-vosk_model = Model(VOSK_MODEL_PATH)
-
-SYSTEM_PROMPT = """Eres un robot asistente amigable y util, hecho con un ESP32.
-Respondes de forma breve y clara, en 1-3 oraciones, ya que tus respuestas
-se convierten a audio. Hablas en español de forma natural y cercana."""
-
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Servidor del robot asistente esta funcionando (version gratuita)."
-
-
-@app.route("/asistente", methods=["POST"])
-def procesar_audio():
+@app.route('/asistente', methods=['POST'])
+def asistente():
     try:
-        audio_bytes = request.data
-        if not audio_bytes:
-            return {"error": "No se recibio audio"}, 400
+        pregunta_texto = ""
 
-        texto_usuario = voz_a_texto(audio_bytes)
-        print(f"Usuario dijo: {texto_usuario}")
+        # ------------------------------------------------------------------
+        # CASO 1: Si envías TEXTO desde el Celular o ESP32 (JSON)
+        # ------------------------------------------------------------------
+        if request.is_json:
+            data = request.get_json()
+            pregunta_texto = data.get("pregunta", "")
+            print(f"[SERVIDOR] Texto recibido: {pregunta_texto}")
 
-        if not texto_usuario or texto_usuario.strip() == "":
-            return {"error": "No se pudo transcribir el audio"}, 400
+        # ------------------------------------------------------------------
+        # CASO 2: Si envías AUDIO desde un Micrófono (RAW / WAV)
+        # ------------------------------------------------------------------
+        else:
+            audio_bytes = request.data
+            if not audio_bytes:
+                return {"error": "No se recibieron datos de audio ni texto"}, 400
 
-        respuesta_texto = generar_respuesta(texto_usuario)
-        print(f"Gemini respondio: {respuesta_texto}")
+            print("[SERVIDOR] Audio recibido. Procesando voz a texto...")
+            recognizer = sr.Recognizer()
+            audio_file = io.BytesIO(audio_bytes)
+            
+            with sr.AudioFile(audio_file) as source:
+                audio_data = recognizer.record(source)
+                pregunta_texto = recognizer.recognize_google(audio_data, language="es-ES")
+            print(f"[SERVIDOR] Audio reconocido como: {pregunta_texto}")
 
-        audio_respuesta = texto_a_voz(respuesta_texto)
+        if not pregunta_texto:
+            return {"error": "No se pudo obtener una pregunta valida"}, 400
 
-        return send_file(
-            io.BytesIO(audio_respuesta),
-            mimetype="audio/mpeg",
-            as_attachment=False
-        )
+        # ------------------------------------------------------------------
+        # PROCESAR PREGUNTA CON GEMINI IA
+        # ------------------------------------------------------------------
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(pregunta_texto)
+        texto_respuesta = response.text
+        print(f"[SERVIDOR] Respuesta IA: {texto_respuesta}")
+
+        # ------------------------------------------------------------------
+        # CONVERTIR RESPUESTA DE LA IA A AUDIO MP3
+        # ------------------------------------------------------------------
+        tts = gTTS(text=texto_respuesta, lang='es')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+
+        # Retornar el archivo de voz MP3
+        return send_file(fp, mimetype="audio/mpeg")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[ERROR]: {str(e)}")
         return {"error": str(e)}, 500
 
-
-def voz_a_texto(audio_bytes):
-    wf = wave.open(io.BytesIO(audio_bytes), "rb")
-    recognizer = KaldiRecognizer(vosk_model, wf.getframerate())
-    recognizer.SetWords(True)
-
-    texto_completo = ""
-    while True:
-        data = wf.readframes(4000)
-        if len(data) == 0:
-            break
-        if recognizer.AcceptWaveform(data):
-            resultado = json.loads(recognizer.Result())
-            texto_completo += resultado.get("text", "") + " "
-
-    resultado_final = json.loads(recognizer.FinalResult())
-    texto_completo += resultado_final.get("text", "")
-
-    return texto_completo.strip()
-
-
-def generar_respuesta(texto_usuario):
-    prompt_completo = f"{SYSTEM_PROMPT}\n\nUsuario: {texto_usuario}"
-    response = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt_completo
-    )
-    return response.text
-
-
-def texto_a_voz(texto):
-    tts = gTTS(text=texto, lang="es")
-    buffer_audio = io.BytesIO()
-    tts.write_to_fp(buffer_audio)
-    buffer_audio.seek(0)
-    return buffer_audio.read()
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
