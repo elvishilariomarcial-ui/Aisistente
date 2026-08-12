@@ -1,4 +1,4 @@
-import os
+        import os
 import io
 from flask import Flask, request, send_file
 import google.generativeai as genai
@@ -47,7 +47,7 @@ def asistente():
         # ------------------------------------------------------------------
         # PROCESAR PREGUNTA CON GEMINI IA
         # ------------------------------------------------------------------
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         response = model.generate_content(pregunta_texto)
         texto_respuesta = response.text
         print(f"[SERVIDOR] Respuesta IA: {texto_respuesta}")
