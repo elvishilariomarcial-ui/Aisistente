@@ -8,36 +8,60 @@ from gtts import gTTS
 
 app = Flask(__name__)
 
-# Configuración de la API Key
+# Configuración de la API Key desde las variables de Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Instrucción para forzar respuestas concisas y ahorrar memoria RAM
 INSTRUCCION_SISTEMA = (
-    "Eres un asistente de voz. Responde siempre de forma concisa, breve y "
-    "directa (máximo 2 oraciones), sin usar formatos ni asteriscos."
+    "Responde siempre de forma muy breve, concisa y directa (máximo 2 oraciones). "
+    "No utilices formatos especiales, listas ni asteriscos."
 )
 
 def consultar_gemini(prompt):
-    modelos_a_probar = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    # 1. Probar lista de modelos estáticos comunes
+    modelos_estaticos = [
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro',
+        'gemini-pro'
+    ]
     
-    for nombre in modelos_a_probar:
+    for m_nombre in modelos_estaticos:
         try:
-            model = genai.GenerativeModel(
-                nombre,
-                system_instruction=INSTRUCCION_SISTEMA
-            )
+            try:
+                model = genai.GenerativeModel(m_nombre, system_instruction=INSTRUCCION_SISTEMA)
+            except Exception:
+                model = genai.GenerativeModel(m_nombre)
+                
             response = model.generate_content(prompt)
             if response and response.text:
+                print(f"[SERVIDOR] Respuesta exitosa con modelo estático: {m_nombre}")
                 return response.text
         except Exception as e:
-            print(f"[INFO] Falló {nombre}: {e}")
+            print(f"[SERVIDOR] Modelo {m_nombre} no disponible: {e}")
             continue
-            
-    raise Exception("No se pudo obtener respuesta de Gemini.")
+
+    # 2. Si fallan los nombres fijos, detectar modelos habilitados dinámicamente
+    print("[SERVIDOR] Consultando modelos disponibles en tu API Key...")
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                try:
+                    m_dinamico = genai.GenerativeModel(m.name)
+                    response = m_dinamico.generate_content(f"{INSTRUCCION_SISTEMA}\n\nPregunta: {prompt}")
+                    if response and response.text:
+                        print(f"[SERVIDOR] Respuesta exitosa con modelo dinámico: {m.name}")
+                        return response.text
+                except Exception as inner_e:
+                    print(f"[SERVIDOR] Falló modelo dinámico {m.name}: {inner_e}")
+                    continue
+    except Exception as list_e:
+        print(f"[SERVIDOR] Error al listar modelos: {list_e}")
+
+    raise Exception("No se pudo conectar con ningún modelo Gemini. Revisa la GEMINI_API_KEY en Render.")
 
 def limpiar_texto(texto):
-    # Eliminar asteriscos y caracteres especiales que sobrecargan gTTS
+    # Remover asteriscos, carácteres de formato e hipermarcado
     texto_limpio = re.sub(r'[*#_`~]', '', texto)
     return texto_limpio.strip()
 
@@ -89,7 +113,7 @@ def pagina_inicio():
                         document.getElementById('status').innerText = '❌ Error: ' + (errJson.error || 'Servidor HTTP ' + res.status);
                     }
                 } catch(e) {
-                    document.getElementById('status').innerText = '❌ Error de conexion: ' + e;
+                    document.getElementById('status').innerText = '❌ Error de conexión: ' + e;
                 }
             }
 
@@ -131,7 +155,7 @@ def asistente():
 
         print(f"[SERVIDOR] Pregunta recibida: {pregunta_texto}")
         
-        # Obtener y limpiar respuesta
+        # Consultar Gemini
         respuesta_raw = consultar_gemini(pregunta_texto)
         respuesta_limpia = limpiar_texto(respuesta_raw)
         print(f"[SERVIDOR] Respuesta limpia: {respuesta_limpia}")
@@ -142,7 +166,7 @@ def asistente():
         tts.write_to_fp(fp)
         fp.seek(0)
 
-        # Liberar memoria RAM
+        # Liberar memoria RAM en Render
         gc.collect()
 
         return send_file(fp, mimetype="audio/mpeg")
