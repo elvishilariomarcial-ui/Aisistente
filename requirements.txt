@@ -1,4 +1,6 @@
 flask
+gunicorn
 google-generativeai
 gTTS
 SpeechRecognition
+
