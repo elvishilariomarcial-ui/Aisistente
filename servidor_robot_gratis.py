@@ -11,22 +11,32 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Lista de modelos compatibles en orden de preferencia
-MODELOS_IA = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest']
-
-def generar_respuesta_gemini(texto):
-    ultimo_error = None
-    for modelo_nombre in MODELOS_IA:
+def generar_respuesta_ia(texto):
+    # 1. Intentar con el modelo estandar actual
+    modelos_prioridad = ['gemini-2.0-flash', 'gemini-2.5-flash']
+    for m_nombre in modelos_prioridad:
         try:
-            model = genai.GenerativeModel(modelo_nombre)
-            response = model.generate_content(texto)
-            print(f"[SERVIDOR] Respuesta exitosa con modelo: {modelo_nombre}")
-            return response.text
+            m = genai.GenerativeModel(m_nombre)
+            res = m.generate_content(texto)
+            print(f"[SERVIDOR] Exito con modelo: {m_nombre}")
+            return res.text
         except Exception as e:
-            ultimo_error = e
-            print(f"[SERVIDOR] Fallo modelo {modelo_nombre}: {e}")
+            print(f"[SERVIDOR] Fallo modelo {m_nombre}: {e}")
             continue
-    raise ultimo_error
+
+    # 2. Si falla, consultar dinamicamente a Google que modelos tiene habilitados tu clave
+    print("[SERVIDOR] Buscando modelos disponibles en tu API Key...")
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            try:
+                m_dinamico = genai.GenerativeModel(m.name)
+                res = m_dinamico.generate_content(texto)
+                print(f"[SERVIDOR] Exito con modelo dinámico: {m.name}")
+                return res.text
+            except Exception:
+                continue
+
+    raise Exception("No se encontro ningun modelo Gemini disponible en tu API Key.")
 
 # ------------------------------------------------------------------
 # INTERFAZ WEB PARA EL CELULAR
@@ -125,8 +135,8 @@ def asistente():
 
         print(f"[SERVIDOR] Pregunta recibida: {pregunta_texto}")
         
-        # Generar respuesta con sistema de respaldo
-        texto_respuesta = generar_respuesta_gemini(pregunta_texto)
+        # Generar respuesta
+        texto_respuesta = generar_respuesta_ia(pregunta_texto)
         print(f"[SERVIDOR] Respuesta Gemini: {texto_respuesta}")
 
         # Convertir texto a audio con gTTS
