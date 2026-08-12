@@ -46,8 +46,7 @@ def asistente():
 
         # ------------------------------------------------------------------
         # PROCESAR PREGUNTA CON GEMINI IA
-        # ------------------------------------------------------------------
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(pregunta_texto)
         texto_respuesta = response.text
         print(f"[SERVIDOR] Respuesta IA: {texto_respuesta}")
