@@ -11,6 +11,19 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
+def obtener_modelo():
+    """Busca automáticamente el primer modelo disponible para generar contenido."""
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                print(f"[SERVIDOR] Modelo detectado: {m.name}")
+                return genai.GenerativeModel(m.name)
+    except Exception as e:
+        print(f"[SERVIDOR] Error al listar modelos: {e}")
+    
+    # Modelo por defecto si falla la lista
+    return genai.GenerativeModel('gemini-1.5-flash')
+
 @app.route('/asistente', methods=['POST'])
 def asistente():
     try:
@@ -46,7 +59,8 @@ def asistente():
 
         # ------------------------------------------------------------------
         # PROCESAR PREGUNTA CON GEMINI IA
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # ------------------------------------------------------------------
+        model = obtener_modelo()
         response = model.generate_content(pregunta_texto)
         texto_respuesta = response.text
         print(f"[SERVIDOR] Respuesta IA: {texto_respuesta}")
