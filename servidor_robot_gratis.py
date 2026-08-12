@@ -1,42 +1,45 @@
 import os
 import io
+import re
+import gc
 from flask import Flask, request, send_file, render_template_string
 import google.generativeai as genai
 from gtts import gTTS
-import speech_recognition as sr
 
 app = Flask(__name__)
 
-# Configuracion de la API Key de Gemini
+# Configuración de la API Key
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-def generar_respuesta_ia(texto):
-    # 1. Intentar con el modelo estandar actual
-    modelos_prioridad = ['gemini-2.0-flash', 'gemini-2.5-flash']
-    for m_nombre in modelos_prioridad:
+# Instrucción para forzar respuestas concisas y ahorrar memoria RAM
+INSTRUCCION_SISTEMA = (
+    "Eres un asistente de voz. Responde siempre de forma concisa, breve y "
+    "directa (máximo 2 oraciones), sin usar formatos ni asteriscos."
+)
+
+def consultar_gemini(prompt):
+    modelos_a_probar = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+    
+    for nombre in modelos_a_probar:
         try:
-            m = genai.GenerativeModel(m_nombre)
-            res = m.generate_content(texto)
-            print(f"[SERVIDOR] Exito con modelo: {m_nombre}")
-            return res.text
+            model = genai.GenerativeModel(
+                nombre,
+                system_instruction=INSTRUCCION_SISTEMA
+            )
+            response = model.generate_content(prompt)
+            if response and response.text:
+                return response.text
         except Exception as e:
-            print(f"[SERVIDOR] Fallo modelo {m_nombre}: {e}")
+            print(f"[INFO] Falló {nombre}: {e}")
             continue
+            
+    raise Exception("No se pudo obtener respuesta de Gemini.")
 
-    # 2. Si falla, consultar dinamicamente a Google que modelos tiene habilitados tu clave
-    print("[SERVIDOR] Buscando modelos disponibles en tu API Key...")
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            try:
-                m_dinamico = genai.GenerativeModel(m.name)
-                res = m_dinamico.generate_content(texto)
-                print(f"[SERVIDOR] Exito con modelo dinámico: {m.name}")
-                return res.text
-            except Exception:
-                continue
-
-    raise Exception("No se encontro ningun modelo Gemini disponible en tu API Key.")
+def limpiar_texto(texto):
+    # Eliminar asteriscos y caracteres especiales que sobrecargan gTTS
+    texto_limpio = re.sub(r'[*#_`~]', '', texto)
+    return texto_limpio.strip()
 
 # ------------------------------------------------------------------
 # INTERFAZ WEB PARA EL CELULAR
@@ -121,34 +124,32 @@ def asistente():
             data = request.get_json()
             pregunta_texto = data.get("pregunta", "")
         else:
-            audio_bytes = request.data
-            if not audio_bytes:
-                return {"error": "Sin datos de audio"}, 400
-            recognizer = sr.Recognizer()
-            audio_file = io.BytesIO(audio_bytes)
-            with sr.AudioFile(audio_file) as source:
-                audio_data = recognizer.record(source)
-                pregunta_texto = recognizer.recognize_google(audio_data, language="es-ES")
+            pregunta_texto = request.data.decode('utf-8', errors='ignore')
 
         if not pregunta_texto:
-            return {"error": "Pregunta vacia o no entendida"}, 400
+            return {"error": "Pregunta vacia"}, 400
 
         print(f"[SERVIDOR] Pregunta recibida: {pregunta_texto}")
         
-        # Generar respuesta
-        texto_respuesta = generar_respuesta_ia(pregunta_texto)
-        print(f"[SERVIDOR] Respuesta Gemini: {texto_respuesta}")
+        # Obtener y limpiar respuesta
+        respuesta_raw = consultar_gemini(pregunta_texto)
+        respuesta_limpia = limpiar_texto(respuesta_raw)
+        print(f"[SERVIDOR] Respuesta limpia: {respuesta_limpia}")
 
-        # Convertir texto a audio con gTTS
-        tts = gTTS(text=texto_respuesta, lang='es')
+        # Generar audio MP3
+        tts = gTTS(text=respuesta_limpia, lang='es')
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         fp.seek(0)
+
+        # Liberar memoria RAM
+        gc.collect()
 
         return send_file(fp, mimetype="audio/mpeg")
 
     except Exception as e:
         print(f"[ERROR SERVIDOR]: {e}")
+        gc.collect()
         return {"error": str(e)}, 500
 
 if __name__ == '__main__':
