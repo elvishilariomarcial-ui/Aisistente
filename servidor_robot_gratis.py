@@ -11,18 +11,27 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TU_API_KEY_AQUI")
 genai.configure(api_key=GEMINI_API_KEY)
 
-def obtener_modelo():
-    """Busca automáticamente el primer modelo disponible para generar contenido."""
+def obtener_modelo_activo():
+    """Prueba en vivo los modelos de la lista hasta encontrar uno activo y funcionando."""
     try:
-        for m in genai.list_models():
+        modelos = genai.list_models()
+        for m in modelos:
             if 'generateContent' in m.supported_generation_methods:
-                print(f"[SERVIDOR] Modelo detectado: {m.name}")
-                return genai.GenerativeModel(m.name)
+                try:
+                    nombre = m.name
+                    # Creamos e intentamos una respuesta mínima para validar
+                    m_test = genai.GenerativeModel(nombre)
+                    m_test.generate_content("hola")
+                    print(f"[SERVIDOR] ¡Modelo verificado exitosamente!: {nombre}")
+                    return m_test
+                except Exception as e:
+                    print(f"[SERVIDOR] El modelo {m.name} no está disponible ({e}), probando el siguiente...")
+                    continue
     except Exception as e:
         print(f"[SERVIDOR] Error al listar modelos: {e}")
     
-    # Modelo por defecto si falla la lista
-    return genai.GenerativeModel('gemini-1.5-flash')
+    # Modelo respaldo por si acaso
+    return genai.GenerativeModel('gemini-2.0-flash')
 
 @app.route('/asistente', methods=['POST'])
 def asistente():
@@ -60,7 +69,7 @@ def asistente():
         # ------------------------------------------------------------------
         # PROCESAR PREGUNTA CON GEMINI IA
         # ------------------------------------------------------------------
-        model = obtener_modelo()
+        model = obtener_modelo_activo()
         response = model.generate_content(pregunta_texto)
         texto_respuesta = response.text
         print(f"[SERVIDOR] Respuesta IA: {texto_respuesta}")
