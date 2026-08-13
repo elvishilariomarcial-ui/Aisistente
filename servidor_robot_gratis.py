@@ -9,32 +9,29 @@ app = Flask(__name__)
 API_KEY = "AQ.Ab8RN6IUIayie6NOarj0g3dwrUEBzDplLZGKmQ2NS91uxtV4Ew"
 genai.configure(api_key=API_KEY)
 
-def obtener_modelo_activo():
-    """Busca un modelo de Gemini válido y disponible en la API"""
-    # Lista de nombres comunes actualizados
-    modelos_candidatos = [
-        'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-pro'
-    ]
-    
-    for nombre_modelo in modelos_candidatos:
+# Lista de modelos oficiales a probar en orden
+MODELOS_ESTABLES = [
+    'gemini-1.5-flash',
+    'gemini-1.5-pro',
+    'gemini-2.0-flash'
+]
+
+def generar_respuesta_ia(prompt):
+    """Intenta generar respuesta probando los modelos disponibles"""
+    for nombre_modelo in MODELOS_ESTABLES:
         try:
-            m = genai.GenerativeModel(nombre_modelo)
-            return m
-        except Exception:
+            print(f"Probando con modelo: {nombre_modelo}")
+            model = genai.GenerativeModel(nombre_modelo)
+            response = model.generate_content(prompt)
+            if response and response.text:
+                print(f"¡Éxito con {nombre_modelo}!")
+                return response.text
+        except Exception as e:
+            print(f"No disponible ({nombre_modelo}): {e}")
             continue
 
-    # Si ninguno de la lista funciona, consulta directamente a la API de Google
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                return genai.GenerativeModel(m.name)
-    except Exception as e:
-        print(f"Error listando modelos: {e}")
-        
-    return genai.GenerativeModel('gemini-2.5-flash')
+    # Si por alguna razón la API no responde, envía un mensaje de respaldo
+    return "Hola, he recibido tu pregunta correctamente."
 
 @app.route('/asistente', methods=['GET', 'POST'])
 def asistente():
@@ -42,20 +39,12 @@ def asistente():
         data = request.get_json(silent=True) or {}
         pregunta = data.get("pregunta", "Hola")
         
-        try:
-            # 1. Obtener modelo funcional
-            model = obtener_modelo_activo()
-            prompt = f"Responde en menos de 20 palabras de forma clara y directa: {pregunta}"
-            
-            response = model.generate_content(prompt)
-            respuesta_texto = response.text
-            print(f"Respuesta de IA: {respuesta_texto}")
-            
-        except Exception as e:
-            print(f"Error al generar con Gemini: {e}")
-            respuesta_texto = "Hola, he recibido tu mensaje correctamente."
+        # 1. Consultar a Gemini
+        prompt = f"Responde en menos de 20 palabras de forma clara y directa: {pregunta}"
+        respuesta_texto = generar_respuesta_ia(prompt)
+        print(f"Texto a convertir en voz: {respuesta_texto}")
         
-        # 2. Generar el archivo MP3 con la voz
+        # 2. Generar audio MP3
         tts = gTTS(text=respuesta_texto, lang='es')
         tts.save("respuesta.mp3")
         
@@ -68,4 +57,3 @@ def asistente():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
-
