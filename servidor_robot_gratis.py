@@ -1,59 +1,35 @@
 import os
+import gc
 from flask import Flask, request, jsonify, send_file
 import google.generativeai as genai
 from gtts import gTTS
 
 app = Flask(__name__)
 
-# ==========================================
-# CONFIGURACIÓN DE LA CLAVE API DESDE RENDER
-# ==========================================
+# Configuración de clave API de Gemini desde Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-def generar_respuesta_ia(prompt):
+def obtener_respuesta_gemini(prompt):
     """
-    Prueba dinámicamente varios modelos de Gemini hasta encontrar
-    uno activo y compatible con la clave de API.
+    Consulta directa a modelos ligeros y oficiales sin sobrecargar la memoria.
     """
-    modelos_a_probar = [
-        'gemini-1.5-flash',
-        'gemini-1.5-pro',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash-8b',
-        'models/gemini-1.5-flash',
-        'models/gemini-1.5-pro'
-    ]
-
-    # Agregar otros modelos listados por la API
-    try:
-        modelos_disponibles = [
-            m.name for m in genai.list_models() 
-            if 'generateContent' in m.supported_generation_methods
-        ]
-        for m_name in modelos_disponibles:
-            if m_name not in modelos_a_probar:
-                modelos_a_probar.append(m_name)
-    except Exception as e:
-        print(f"No se pudo consultar la lista de modelos: {e}")
-
-    # Probar cada modelo hasta que uno responda
-    ultimo_error = None
-    for nombre_modelo in modelos_a_probar:
+    modelos_ligeros = ['gemini-1.5-flash', 'gemini-1.5-pro']
+    
+    for nombre in modelos_ligeros:
         try:
-            print(f"Probando con modelo: {nombre_modelo}...")
-            model = genai.GenerativeModel(nombre_modelo)
+            print(f"Consultando modelo ligero: {nombre}")
+            model = genai.GenerativeModel(nombre)
             response = model.generate_content(prompt)
             if response and response.text:
-                print(f"¡Modelo funcional encontrado!: {nombre_modelo}")
                 return response.text
         except Exception as e:
-            print(f"Modelo {nombre_modelo} no disponible: {e}")
-            ultimo_error = e
+            print(f"No se pudo usar {nombre}: {e}")
+            continue
 
-    raise Exception(f"Ningún modelo estuvo disponible. Último error: {ultimo_error}")
+    raise Exception("Ningún modelo ligero respondió.")
 
 @app.route('/', methods=['GET'])
 def home():
@@ -72,22 +48,27 @@ def asistente():
 
         prompt = f"Responde de forma breve y concisa (máximo 2 oraciones) para ser leída en voz alta: {pregunta}"
         
-        # Generar respuesta probando modelos activos
-        texto_respuesta = generar_respuesta_ia(prompt)
+        # Generar texto con la IA
+        texto_respuesta = obtener_respuesta_gemini(prompt)
         print(f"Respuesta IA: {texto_respuesta}")
 
-        # Convertir texto a archivo MP3
+        # Generar audio MP3
         tts = gTTS(text=texto_respuesta, lang='es')
         tts.save("respuesta.mp3")
+
+        # Liberar memoria RAM del servidor de forma inmediata
+        gc.collect()
 
         return jsonify({"respuesta": texto_respuesta}), 200
 
     except Exception as e:
         print(f"Error procesando la solicitud: {e}")
-        # Audio de respaldo para evitar fallos en el microcontrolador
-        mensaje_error = "Ocurrió un error al procesar tu pregunta con la inteligencia artificial."
-        tts = gTTS(text=mensaje_error, lang='es')
+        
+        # Audio de respaldo
+        tts = gTTS(text="Ocurrió un error de memoria o conexión en el servidor.", lang='es')
         tts.save("respuesta.mp3")
+        gc.collect()
+        
         return jsonify({"error": str(e)}), 500
 
 @app.route('/audio', methods=['GET'])
@@ -99,3 +80,4 @@ def obtener_audio():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
+
