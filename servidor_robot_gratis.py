@@ -1,45 +1,62 @@
-from flask import Flask, request, send_file, jsonify
+import os
+from flask import Flask, request, jsonify, send_file
 import google.generativeai as genai
 from gtts import gTTS
-import os
 
 app = Flask(__name__)
 
-# 🔑 Tu clave de API de Gemini (debe empezar con AIzaSy...)
-API_KEY = "TU_CLAVE_AQUI"
-genai.configure(api_key=API_KEY)
+# ==========================================
+# CONFIGURACIÓN DE LA CLAVE API DE GEMINI
+# ==========================================
+# Reemplaza la cadena si le faltaron caracteres al copiarla de la pantalla
+GEMINI_API_KEY = "AQ.Ab8RN6IUlayie6NOarj0g3dwrUEBzD..." 
+
+genai.configure(api_key=GEMINI_API_KEY)
+
+# Inicializar modelo de Gemini
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+@app.route('/', methods=['GET'])
+def home():
+    return "Servidor del Asistente Activo y Funcionando", 200
 
 @app.route('/asistente', methods=['POST'])
 def asistente():
-    data = request.get_json(silent=True) or {}
-    pregunta = data.get("pregunta", "Hola")
-    
     try:
-        # Intentar responder con Gemini
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"Responde en menos de 20 palabras de forma clara: {pregunta}"
-        response = model.generate_content(prompt)
-        respuesta_texto = response.text
-        print(f"Respuesta de IA: {respuesta_texto}")
+        data = request.get_json(silent=True) or {}
+        pregunta = data.get('pregunta', '')
+
+        if not pregunta:
+            return jsonify({"error": "No se recibió ninguna pregunta"}), 400
+
+        print(f"Pregunta recibida: {pregunta}")
+
+        # Generar respuesta de voz en texto con Gemini
+        response = model.generate_content(
+            f"Responde de forma breve y concisa (máximo 2 oraciones) para ser leída en voz alta: {pregunta}"
+        )
+        texto_respuesta = response.text
+        print(f"Respuesta IA: {texto_respuesta}")
+
+        # Convertir la respuesta a archivo de audio MP3
+        tts = gTTS(text=texto_respuesta, lang='es')
+        tts.save("respuesta.mp3")
+
+        return jsonify({"respuesta": texto_respuesta}), 200
+
     except Exception as e:
-        print(f"Error Gemini: {e}")
-        respuesta_texto = "Hola, he recibido tu mensaje correctamente."
-    
-    # Eliminar audio anterior si existe
-    if os.path.exists("respuesta.mp3"):
-        os.remove("respuesta.mp3")
-        
-    # Generar nuevo MP3
-    tts = gTTS(text=respuesta_texto, lang='es')
-    tts.save("respuesta.mp3")
-    
-    return jsonify({"status": "ok"})
+        print(f"Error procesando la solicitud: {e}")
+        # Audio de respaldo en caso de fallo
+        tts = gTTS(text="Ocurrió un error al procesar tu pregunta.", lang='es')
+        tts.save("respuesta.mp3")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/audio', methods=['GET'])
-def descargar_audio():
+def obtener_audio():
     if os.path.exists("respuesta.mp3"):
         return send_file("respuesta.mp3", mimetype="audio/mpeg")
-    return "No hay audio", 404
+    return "Archivo de audio no encontrado", 404
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
