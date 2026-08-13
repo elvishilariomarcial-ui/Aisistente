@@ -13,26 +13,47 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-def obtener_modelo_activo():
-    """Selecciona automáticamente el modelo disponible en tu cuenta."""
+def generar_respuesta_ia(prompt):
+    """
+    Prueba dinámicamente varios modelos de Gemini hasta encontrar
+    uno activo y compatible con la clave de API.
+    """
+    modelos_a_probar = [
+        'gemini-1.5-flash',
+        'gemini-1.5-pro',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash-8b',
+        'models/gemini-1.5-flash',
+        'models/gemini-1.5-pro'
+    ]
+
+    # Agregar otros modelos listados por la API
     try:
-        modelos = list(genai.list_models())
-        # Buscar primero un modelo de la familia 'flash' disponible
-        for m in modelos:
-            if 'generateContent' in m.supported_generation_methods:
-                if 'flash' in m.name:
-                    print(f"Usando modelo: {m.name}")
-                    return genai.GenerativeModel(m.name)
-        # Si no encuentra 'flash', usa el primer modelo disponible
-        for m in modelos:
-            if 'generateContent' in m.supported_generation_methods:
-                print(f"Usando modelo: {m.name}")
-                return genai.GenerativeModel(m.name)
+        modelos_disponibles = [
+            m.name for m in genai.list_models() 
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        for m_name in modelos_disponibles:
+            if m_name not in modelos_a_probar:
+                modelos_a_probar.append(m_name)
     except Exception as e:
-        print(f"Error detectando modelos: {e}")
-    
-    # Modelo predeterminado de respaldo
-    return genai.GenerativeModel('models/gemini-1.5-flash')
+        print(f"No se pudo consultar la lista de modelos: {e}")
+
+    # Probar cada modelo hasta que uno responda
+    ultimo_error = None
+    for nombre_modelo in modelos_a_probar:
+        try:
+            print(f"Probando con modelo: {nombre_modelo}...")
+            model = genai.GenerativeModel(nombre_modelo)
+            response = model.generate_content(prompt)
+            if response and response.text:
+                print(f"¡Modelo funcional encontrado!: {nombre_modelo}")
+                return response.text
+        except Exception as e:
+            print(f"Modelo {nombre_modelo} no disponible: {e}")
+            ultimo_error = e
+
+    raise Exception(f"Ningún modelo estuvo disponible. Último error: {ultimo_error}")
 
 @app.route('/', methods=['GET'])
 def home():
@@ -49,17 +70,13 @@ def asistente():
 
         print(f"Pregunta recibida: {pregunta}")
 
-        # Obtener modelo dinámico
-        model = obtener_modelo_activo()
-
-        # Generar respuesta con la IA
-        response = model.generate_content(
-            f"Responde de forma breve y concisa (máximo 2 oraciones) para ser leída en voz alta: {pregunta}"
-        )
-        texto_respuesta = response.text
+        prompt = f"Responde de forma breve y concisa (máximo 2 oraciones) para ser leída en voz alta: {pregunta}"
+        
+        # Generar respuesta probando modelos activos
+        texto_respuesta = generar_respuesta_ia(prompt)
         print(f"Respuesta IA: {texto_respuesta}")
 
-        # Convertir texto a archivo de audio MP3
+        # Convertir texto a archivo MP3
         tts = gTTS(text=texto_respuesta, lang='es')
         tts.save("respuesta.mp3")
 
@@ -67,8 +84,9 @@ def asistente():
 
     except Exception as e:
         print(f"Error procesando la solicitud: {e}")
-        # Audio de respaldo para evitar fallos en la ESP32
-        tts = gTTS(text="Ocurrió un error al procesar tu pregunta.", lang='es')
+        # Audio de respaldo para evitar fallos en el microcontrolador
+        mensaje_error = "Ocurrió un error al procesar tu pregunta con la inteligencia artificial."
+        tts = gTTS(text=mensaje_error, lang='es')
         tts.save("respuesta.mp3")
         return jsonify({"error": str(e)}), 500
 
