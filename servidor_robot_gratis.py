@@ -6,14 +6,14 @@ from gtts import gTTS
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN DE LA CLAVE API DE GEMINI
+# CONFIGURACIÓN DE LA CLAVE API DESDE RENDER
 # ==========================================
-# Reemplaza la cadena si le faltaron caracteres al copiarla de la pantalla
-GEMINI_API_KEY = "AQ.Ab8RN6IUlayie6NOarj0g3dwrUEBzD..." 
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
-# Inicializar modelo de Gemini
+# Inicializar el modelo recomendado
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 @app.route('/', methods=['GET'])
@@ -31,14 +31,14 @@ def asistente():
 
         print(f"Pregunta recibida: {pregunta}")
 
-        # Generar respuesta de voz en texto con Gemini
+        # Generar respuesta corta con IA
         response = model.generate_content(
             f"Responde de forma breve y concisa (máximo 2 oraciones) para ser leída en voz alta: {pregunta}"
         )
         texto_respuesta = response.text
         print(f"Respuesta IA: {texto_respuesta}")
 
-        # Convertir la respuesta a archivo de audio MP3
+        # Convertir texto a voz MP3
         tts = gTTS(text=texto_respuesta, lang='es')
         tts.save("respuesta.mp3")
 
