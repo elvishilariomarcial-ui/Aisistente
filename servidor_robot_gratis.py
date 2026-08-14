@@ -1,4 +1,5 @@
 import os
+import re
 from flask import Flask, request, jsonify, send_file
 import google.generativeai as genai
 from gtts import gTTS
@@ -12,15 +13,21 @@ if GEMINI_API_KEY:
 
 AUDIO_FILE = "respuesta.mp3"
 
+def limpiar_texto(texto):
+    """
+    Elimina comillas, asteriscos, guiones y símbolos de formato 
+    para que la voz lea únicamente la frase limpia.
+    """
+    # Eliminar asteriscos, comillas, almohadillas, guiones y tildes de formato
+    texto_limpio = re.sub(r'[*_#"`~-]', '', texto)
+    # Reemplazar múltiples espacios o saltos de línea por un solo espacio
+    texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
+    return texto_limpio.strip()
+
 def generar_texto_ia(prompt):
-    """
-    Recorre la lista de modelos de Google y genera respuesta 
-    con el primero que funcione correctamente.
-    """
     modelos_candidatos = []
     
     try:
-        # Obtener todos los modelos soportados
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
                 modelos_candidatos.append(m.name)
@@ -32,7 +39,6 @@ def generar_texto_ia(prompt):
 
     ultimo_error = ""
     
-    # Probar modelo por modelo hasta tener éxito
     for nombre_modelo in modelos_candidatos:
         try:
             print(f"Probando modelo: {nombre_modelo}")
@@ -65,17 +71,21 @@ def asistente():
 
         print(f"Pregunta recibida: {pregunta}")
 
-        # Generar respuesta probando modelos dinámicamente
-        prompt = f"Responde de forma concisa en una sola frase: {pregunta}"
-        texto_respuesta = generar_texto_ia(prompt)
+        # Prompt que exige texto plano directo
+        prompt = f"Responde de forma directa y concisa en una sola frase, usando únicamente texto plano sin asteriscos, sin comillas y sin negritas: {pregunta}"
         
-        print(f"Respuesta IA: {texto_respuesta}")
+        texto_raw = generar_texto_ia(prompt)
+        
+        # Filtro de seguridad para limpiar cualquier símbolo restante
+        texto_respuesta = limpiar_texto(texto_raw)
+        
+        print(f"Respuesta limpia: {texto_respuesta}")
 
         # Borrar el audio previo si existe
         if os.path.exists(AUDIO_FILE):
             os.remove(AUDIO_FILE)
 
-        # Generar nuevo archivo MP3
+        # Generar archivo MP3 con el texto limpio
         tts = gTTS(text=texto_respuesta, lang='es', slow=False)
         tts.save(AUDIO_FILE)
 
