@@ -1,14 +1,12 @@
 import os
 import gc
 import requests
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, Response
 from gtts import gTTS
 
 app = Flask(__name__)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# Ruta absoluta garantizada para almacenar el archivo MP3
 AUDIO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "respuesta.mp3")
 
 def consultar_gemini_dinamico(prompt):
@@ -77,11 +75,9 @@ def asistente():
         texto_respuesta = consultar_gemini_dinamico(prompt)
         print(f"Respuesta IA: {texto_respuesta}")
 
-        # Eliminar versión anterior si existe
         if os.path.exists(AUDIO_PATH):
             os.remove(AUDIO_PATH)
 
-        # Generar nuevo audio MP3
         tts = gTTS(text=texto_respuesta, lang='es')
         tts.save(AUDIO_PATH)
 
@@ -107,20 +103,29 @@ def asistente():
 @app.route('/audio', methods=['GET'])
 def obtener_audio():
     if os.path.exists(AUDIO_PATH):
-        tamano_archivo = os.path.getsize(AUDIO_PATH)
-        print(f"Enviando audio al ESP32 ({tamano_archivo} bytes)...")
-        
-        response = send_file(
-            AUDIO_PATH,
-            mimetype="audio/mpeg",
-            as_attachment=False
-        )
-        
-        # Encabezados necesarios para reproductores de hardware como ESP32
-        response.headers["Content-Length"] = str(tamano_archivo)
-        response.headers["Accept-Ranges"] = "bytes"
-        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        return response
+        try:
+            # Leer binario completo para envío directo
+            with open(AUDIO_PATH, "rb") as f:
+                contenido_bytes = f.read()
+            
+            tamano = len(contenido_bytes)
+            print(f"Servidor entregando directamente {tamano} bytes de audio...")
+
+            return Response(
+                contenido_bytes,
+                status=200,
+                mimetype="audio/mpeg",
+                headers={
+                    "Content-Type": "audio/mpeg",
+                    "Content-Length": str(tamano),
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0"
+                }
+            )
+        except Exception as e:
+            print(f"Error al leer binario de audio: {e}")
+            return "Error interno del servidor al leer el audio", 500
 
     print("Error: Archivo respuesta.mp3 no encontrado")
     return "Archivo de audio no encontrado", 404
