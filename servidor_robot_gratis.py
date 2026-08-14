@@ -24,68 +24,73 @@ def limpiar_texto(texto):
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
     return texto_limpio.strip()
 
-def obtener_modelo_y_version():
-    """Consulta dinámicamente a la API de Google qué modelos están disponibles para tu API Key."""
+def obtener_candidatos():
+    """Obtiene todos los modelos disponibles que soporten generación de texto."""
+    candidatos = []
     for api_version in ["v1beta", "v1"]:
         url = f"https://generativelanguage.googleapis.com/{api_version}/models?key={GEMINI_API_KEY}"
         try:
             res = requests.get(url, timeout=8)
             if res.status_code == 200:
                 models = res.json().get("models", [])
-                candidatos = []
                 for m in models:
                     methods = m.get("supportedGenerationMethods", [])
                     if "generateContent" in methods:
-                        name = m.get("name") # Retorna el nombre completo (ej. "models/gemini-1.5-flash")
-                        candidatos.append((api_version, name))
-                
-                # Priorizar modelos rápidos de tipo 'flash'
-                for ver, name in candidatos:
-                    if "flash" in name.lower():
-                        return ver, name
-                
-                if candidatos:
-                    return candidatos[0]
+                        name = m.get("name")
+                        if name:
+                            candidatos.append((api_version, name))
         except Exception as e:
-            print(f"Error al verificar modelos en {api_version}: {e}")
+            print(f"Error al listar en {api_version}: {e}")
             
-    return None, None
+    # Ordenar priorizando modelos ligeros/flash
+    candidatos.sort(key=lambda x: (0 if "flash" in x[1].lower() else 1, x[1]))
+    return candidatos
 
 def generar_texto_ia(pregunta):
     if not GEMINI_API_KEY:
         raise Exception("Falta la variable de entorno GEMINI_API_KEY en Render")
 
-    api_version, model_name = obtener_modelo_y_version()
+    candidatos = obtener_candidatos()
     
-    if not model_name:
-        raise Exception("No se encontró ningún modelo activo. Verifica que tu API Key en Render sea válida.")
+    if not candidatos:
+        raise Exception("No se encontraron modelos disponibles para tu API Key.")
 
-    print(f"Modelo detectado automáticamente: {model_name} (Versión API: {api_version})")
+    ultimo_error = ""
 
-    url = f"https://generativelanguage.googleapis.com/{api_version}/{model_name}:generateContent?key={GEMINI_API_KEY}"
-    
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}
-                ]
-            }
-        ]
-    }
+    # Recorre TODOS los modelos detectados hasta encontrar uno que funcione
+    for api_version, model_name in candidatos:
+        url = f"https://generativelanguage.googleapis.com/{api_version}/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}
+                    ]
+                }
+            ]
+        }
 
-    res = requests.post(url, json=payload, timeout=12)
-    data = res.json()
+        try:
+            res = requests.post(url, json=payload, timeout=10)
+            data = res.json()
 
-    if res.status_code == 200:
-        candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            if parts:
-                return parts[0].get("text", "").strip()
-    
-    msg = data.get("error", {}).get("message", res.text)
-    raise Exception(f"Error en {model_name}: {msg}")
+            if res.status_code == 200:
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        print(f"Respuesta generada con éxito usando {model_name} ({api_version})")
+                        return parts[0].get("text", "").strip()
+            else:
+                msg = data.get("error", {}).get("message", res.text)
+                print(f"Saltando {model_name} por error: {msg}")
+                ultimo_error = msg
+        except Exception as e:
+            print(f"Excepción en {model_name}: {e}")
+            ultimo_error = str(e)
+
+    raise Exception(f"Ningún modelo respondió con éxito. Último error: {ultimo_error}")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -107,11 +112,11 @@ def asistente():
         
         print(f"Respuesta final: {texto_respuesta}")
 
-        # Eliminar archivo anterior
+        # Limpiar archivo previo
         if os.path.exists(AUDIO_FILE):
             os.remove(AUDIO_FILE)
 
-        # Crear audio de voz
+        # Generar archivo de voz
         tts = gTTS(text=texto_respuesta, lang='es', slow=False)
         tts.save(AUDIO_FILE)
 
