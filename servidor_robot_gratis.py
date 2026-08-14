@@ -10,17 +10,6 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
 
-# Modelos a probar en orden de prioridad
-MODELOS = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro",
-    "gemini-2.0-flash"
-]
-
-# Versiones de API de respaldo
-API_VERSIONS = ["v1beta", "v1"]
-
 SYSTEM_INSTRUCTION = (
     "Eres un asistente de voz inteligente en español. Responde SIEMPRE exclusivamente en español. "
     "Tu respuesta debe ser una explicación o descripción breve de 1 a 2 oraciones completas sobre el tema consultado. "
@@ -30,53 +19,73 @@ SYSTEM_INSTRUCTION = (
 )
 
 def limpiar_texto(texto):
-    """Elimina símbolos de formato Markdown y espacios innecesarios."""
+    """Elimina formato Markdown y caracteres especiales."""
     texto_limpio = re.sub(r'[*_#"`~-]', '', texto)
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
     return texto_limpio.strip()
+
+def obtener_modelo_y_version():
+    """Consulta dinámicamente a la API de Google qué modelos están disponibles para tu API Key."""
+    for api_version in ["v1beta", "v1"]:
+        url = f"https://generativelanguage.googleapis.com/{api_version}/models?key={GEMINI_API_KEY}"
+        try:
+            res = requests.get(url, timeout=8)
+            if res.status_code == 200:
+                models = res.json().get("models", [])
+                candidatos = []
+                for m in models:
+                    methods = m.get("supportedGenerationMethods", [])
+                    if "generateContent" in methods:
+                        name = m.get("name") # Retorna el nombre completo (ej. "models/gemini-1.5-flash")
+                        candidatos.append((api_version, name))
+                
+                # Priorizar modelos rápidos de tipo 'flash'
+                for ver, name in candidatos:
+                    if "flash" in name.lower():
+                        return ver, name
+                
+                if candidatos:
+                    return candidatos[0]
+        except Exception as e:
+            print(f"Error al verificar modelos en {api_version}: {e}")
+            
+    return None, None
 
 def generar_texto_ia(pregunta):
     if not GEMINI_API_KEY:
         raise Exception("Falta la variable de entorno GEMINI_API_KEY en Render")
 
-    ultimo_error = ""
+    api_version, model_name = obtener_modelo_y_version()
+    
+    if not model_name:
+        raise Exception("No se encontró ningún modelo activo. Verifica que tu API Key en Render sea válida.")
 
-    # Probamos combinaciones de versión de API y modelo hasta tener éxito
-    for api_version in API_VERSIONS:
-        for modelo in MODELOS:
-            url = f"https://generativelanguage.googleapis.com/{api_version}/models/{modelo}:generateContent?key={GEMINI_API_KEY}"
-            
-            # Formato universal 100% compatible sin esquemas estrictos
-            payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}
-                        ]
-                    }
+    print(f"Modelo detectado automáticamente: {model_name} (Versión API: {api_version})")
+
+    url = f"https://generativelanguage.googleapis.com/{api_version}/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}
                 ]
             }
+        ]
+    }
 
-            try:
-                res = requests.post(url, json=payload, timeout=10)
-                data = res.json()
+    res = requests.post(url, json=payload, timeout=12)
+    data = res.json()
 
-                if res.status_code == 200:
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            print(f"¡Respuesta recibida con éxito usando {modelo} en {api_version}!")
-                            return parts[0].get("text", "").strip()
-                else:
-                    msg = data.get("error", {}).get("message", res.text)
-                    print(f"Error {res.status_code} en {modelo} ({api_version}): {msg}")
-                    ultimo_error = msg
-            except Exception as e:
-                print(f"Excepción en {modelo} ({api_version}): {str(e)}")
-                ultimo_error = str(e)
-
-    raise Exception(f"No se pudo consultar la IA. Último error: {ultimo_error}")
+    if res.status_code == 200:
+        candidates = data.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                return parts[0].get("text", "").strip()
+    
+    msg = data.get("error", {}).get("message", res.text)
+    raise Exception(f"Error en {model_name}: {msg}")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -98,15 +107,14 @@ def asistente():
         
         print(f"Respuesta final: {texto_respuesta}")
 
-        # Limpieza de archivo de audio previo
+        # Eliminar archivo anterior
         if os.path.exists(AUDIO_FILE):
             os.remove(AUDIO_FILE)
 
-        # Generar nuevo audio
+        # Crear audio de voz
         tts = gTTS(text=texto_respuesta, lang='es', slow=False)
         tts.save(AUDIO_FILE)
 
-        # Liberación inmediata de RAM
         gc.collect()
 
         return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
