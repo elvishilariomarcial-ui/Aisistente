@@ -12,32 +12,43 @@ if GEMINI_API_KEY:
 
 AUDIO_FILE = "respuesta.mp3"
 
-def obtener_modelo_activo():
-    """Busca automáticamente un modelo funcional en la API de Google."""
-    try:
-        modelos = genai.list_models()
-        modelos_compatibles = []
-        
-        for m in modelos:
-            if 'generateContent' in m.supported_generation_methods:
-                modelos_compatibles.append(m.name)
-        
-        # Priorizar modelos 'flash' por ser más rápidos para respuestas cortas
-        for nombre_modelo in modelos_compatibles:
-            if 'flash' in nombre_modelo.lower():
-                print(f"Modelo seleccionado automáticamente: {nombre_modelo}")
-                return nombre_modelo
-        
-        # Si no hay 'flash', usa el primer modelo disponible
-        if modelos_compatibles:
-            print(f"Modelo fallback seleccionado: {modelos_compatibles[0]}")
-            return modelos_compatibles[0]
-
-    except Exception as e:
-        print(f"Error al listar modelos: {str(e)}")
+def generar_texto_ia(prompt):
+    """
+    Recorre la lista de modelos de Google y genera respuesta 
+    con el primero que funcione correctamente.
+    """
+    modelos_candidatos = []
     
-    # Nombre por defecto si la consulta de lista falla
-    return "gemini-1.5-flash-latest"
+    try:
+        # Obtener todos los modelos soportados
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                modelos_candidatos.append(m.name)
+    except Exception as e:
+        print(f"Error al obtener lista de modelos: {e}")
+
+    if not modelos_candidatos:
+        raise Exception("No se pudieron listar los modelos de la API")
+
+    ultimo_error = ""
+    
+    # Probar modelo por modelo hasta tener éxito
+    for nombre_modelo in modelos_candidatos:
+        try:
+            print(f"Probando modelo: {nombre_modelo}")
+            model = genai.GenerativeModel(nombre_modelo)
+            response = model.generate_content(prompt)
+            
+            if response and response.text:
+                print(f"¡Respuesta exitosa recibida de {nombre_modelo}!")
+                return response.text.strip()
+                
+        except Exception as e:
+            print(f"Fallo en {nombre_modelo}: {str(e)}")
+            ultimo_error = str(e)
+            continue
+
+    raise Exception(f"Ningún modelo de Gemini respondió. Último mensaje: {ultimo_error}")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -54,17 +65,13 @@ def asistente():
 
         print(f"Pregunta recibida: {pregunta}")
 
-        # Obtener un modelo válido y activo
-        nombre_modelo = obtener_modelo_activo()
-        model = genai.GenerativeModel(nombre_modelo)
-        
-        # Generar texto de respuesta
-        response = model.generate_content(f"Responde de forma concisa en una sola frase: {pregunta}")
-        texto_respuesta = response.text.strip()
+        # Generar respuesta probando modelos dinámicamente
+        prompt = f"Responde de forma concisa en una sola frase: {pregunta}"
+        texto_respuesta = generar_texto_ia(prompt)
         
         print(f"Respuesta IA: {texto_respuesta}")
 
-        # Borrar el audio previo si existe para evitar conflictos de escritura
+        # Borrar el audio previo si existe
         if os.path.exists(AUDIO_FILE):
             os.remove(AUDIO_FILE)
 
