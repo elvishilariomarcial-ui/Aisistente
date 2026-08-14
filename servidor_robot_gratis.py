@@ -12,6 +12,33 @@ if GEMINI_API_KEY:
 
 AUDIO_FILE = "respuesta.mp3"
 
+def obtener_modelo_activo():
+    """Busca automáticamente un modelo funcional en la API de Google."""
+    try:
+        modelos = genai.list_models()
+        modelos_compatibles = []
+        
+        for m in modelos:
+            if 'generateContent' in m.supported_generation_methods:
+                modelos_compatibles.append(m.name)
+        
+        # Priorizar modelos 'flash' por ser más rápidos para respuestas cortas
+        for nombre_modelo in modelos_compatibles:
+            if 'flash' in nombre_modelo.lower():
+                print(f"Modelo seleccionado automáticamente: {nombre_modelo}")
+                return nombre_modelo
+        
+        # Si no hay 'flash', usa el primer modelo disponible
+        if modelos_compatibles:
+            print(f"Modelo fallback seleccionado: {modelos_compatibles[0]}")
+            return modelos_compatibles[0]
+
+    except Exception as e:
+        print(f"Error al listar modelos: {str(e)}")
+    
+    # Nombre por defecto si la consulta de lista falla
+    return "gemini-1.5-flash-latest"
+
 @app.route('/', methods=['GET'])
 def index():
     return "Servidor Asistente IA Activo", 200
@@ -27,8 +54,9 @@ def asistente():
 
         print(f"Pregunta recibida: {pregunta}")
 
-        # Configurar el modelo Gemini
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Obtener un modelo válido y activo
+        nombre_modelo = obtener_modelo_activo()
+        model = genai.GenerativeModel(nombre_modelo)
         
         # Generar texto de respuesta
         response = model.generate_content(f"Responde de forma concisa en una sola frase: {pregunta}")
