@@ -1,22 +1,19 @@
 import os
 import re
 import gc
+import requests
 from flask import Flask, request, jsonify, send_file
-import google.generativeai as genai
 from gtts import gTTS
 
 app = Flask(__name__)
 
-# Configuración de la API Key
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
 AUDIO_FILE = "respuesta.mp3"
 
-# Modelos recomendados ordenados por prioridad y rapidez
-MODELOS_PREFERIDOS = [
+# Modelos en orden de prioridad
+MODELOS = [
     "gemini-1.5-flash",
+    "gemini-2.0-flash",
     "gemini-1.5-flash-latest",
     "gemini-1.5-pro"
 ]
@@ -30,27 +27,51 @@ SYSTEM_INSTRUCTION = (
 )
 
 def limpiar_texto(texto):
-    """Elimina símbolos de formato Markdown y espacios innecesarios."""
+    """Elimina formato Markdown y caracteres especiales."""
     texto_limpio = re.sub(r'[*_#"`~-]', '', texto)
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
     return texto_limpio.strip()
 
 def generar_texto_ia(pregunta):
-    """Intenta generar respuesta probando únicamente una lista corta de modelos rápidos."""
+    if not GEMINI_API_KEY:
+        raise Exception("Falta la variable de entorno GEMINI_API_KEY")
+
     ultimo_error = ""
-    for nombre_modelo in MODELOS_PREFERIDOS:
+
+    # Probar modelos mediante petición HTTP directa (muy ligero en RAM)
+    for modelo in MODELOS:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_API_KEY}"
+        
+        payload = {
+            "system_instruction": {
+                "parts": [{"text": SYSTEM_INSTRUCTION}]
+            },
+            "contents": [
+                {
+                    "parts": [{"text": f"Pregunta: {pregunta}"}]
+                }
+            ]
+        }
+
         try:
-            model = genai.GenerativeModel(
-                model_name=nombre_modelo,
-                system_instruction=SYSTEM_INSTRUCTION
-            )
-            response = model.generate_content(f"Pregunta: {pregunta}")
-            if response and response.text:
-                return response.text.strip()
+            res = requests.post(url, json=payload, timeout=12)
+            data = res.json()
+
+            if res.status_code == 200:
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        print(f"Respuesta obtenida con éxito usando el modelo: {modelo}")
+                        return parts[0].get("text", "").strip()
+            else:
+                msg = data.get("error", {}).get("message", res.text)
+                print(f"Fallo en modelo {modelo}: {msg}")
+                ultimo_error = msg
         except Exception as e:
+            print(f"Excepción en modelo {modelo}: {str(e)}")
             ultimo_error = str(e)
-            continue
-            
+
     raise Exception(f"No se pudo consultar la IA. Último error: {ultimo_error}")
 
 @app.route('/', methods=['GET'])
@@ -73,15 +94,15 @@ def asistente():
         
         print(f"Respuesta final: {texto_respuesta}")
 
-        # Limpieza de archivo previo
+        # Limpieza de archivo de audio previo
         if os.path.exists(AUDIO_FILE):
             os.remove(AUDIO_FILE)
 
-        # Generación de voz
+        # Generar nuevo audio
         tts = gTTS(text=texto_respuesta, lang='es', slow=False)
         tts.save(AUDIO_FILE)
 
-        # Forzar la recolección de basura para liberar RAM en Render
+        # Liberación inmediata de RAM
         gc.collect()
 
         return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
@@ -96,7 +117,7 @@ def audio():
     try:
         if os.path.exists(AUDIO_FILE):
             return send_file(AUDIO_FILE, mimetype="audio/mpeg")
-        return jsonify({"error": "Archivo no encontrado"}), 404
+        return jsonify({"error": "Archivo de audio no encontrado"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
