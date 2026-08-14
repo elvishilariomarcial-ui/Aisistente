@@ -1,6 +1,7 @@
 Flask
-requests
+google-generativeai
 gTTS
 gunicorn
+
 
 
