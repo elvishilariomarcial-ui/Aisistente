@@ -11,16 +11,17 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
 
-# --- PERSONALIDAD JARVIS ACTUALIZADA ---
+# --- PERSONALIDAD Y REGLAS DE JARVIS ---
 SYSTEM_INSTRUCTION = (
-    "Eres JARVIS, el sistema de inteligencia artificial del Señor  . "
-    "Tu objetivo principal es proporcionar información detallada, técnica, precisa y útil. "
-    "Prioriza siempre los datos, hechos y explicaciones claras sobre cualquier otra cosa. "
-    "Sé formal, profesional y directo. Evita cumplidos innecesarios o cortesías excesivas; "
-    "enfócate en la eficiencia. Siempre debes dirigirte al usuario como 'señor'. "
-    "Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
+    "Eres JARVIS, el sistema de inteligencia artificial del Señor. "
+    "Tu objetivo es proporcionar información detallada, técnica, precisa y útil. "
+    "Reglas estrictas de formato: "
+    "1. Dirígete al usuario siempre como 'señor'. "
+    "2. REGLA CONDICIONAL: Si la pregunta del usuario comienza con la palabra 'puedes' y tu respuesta es afirmativa, "
+    "tu respuesta debe comenzar obligatoriamente con la frase 'Claro señor, ' seguida de la explicación. "
+    "3. En el resto de los casos, responde de manera directa y profesional. "
+    "4. Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
     "Entrega únicamente el texto final que será leído por el altavoz."
-    "cada que entreges una respuesta y el usuario diga puedes al inicio de la pregunta y la respuesta sea afirmativa tienes que decir claro señor al inicio de la respuesta."
 )
 
 # Voz de JARVIS
@@ -28,7 +29,6 @@ VOZ_JARVIS = "es-ES-AlvaroNeural"
 
 async def generar_voz_jarvis(texto, ruta_salida):
     """Genera la voz neuronal con estilo grave y pausado."""
-    # Mantenemos el tono grave y pausado para el toque JARVIS
     comunicador = edge_tts.Communicate(texto, VOZ_JARVIS, rate="-5%", pitch="-5Hz")
     await comunicador.save(ruta_salida)
 
@@ -60,7 +60,6 @@ def generar_texto_ia(pregunta):
     candidatos = obtener_candidatos()
     for api_version, model_name in candidatos:
         url = f"https://generativelanguage.googleapis.com/{api_version}/{model_name}:generateContent?key={GEMINI_API_KEY}"
-        # Se envía la instrucción del sistema y la pregunta
         payload = {"contents": [{"parts": [{"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}]}]}
         try:
             res = requests.post(url, json=payload, timeout=10)
@@ -75,6 +74,23 @@ def generar_texto_ia(pregunta):
 def index():
     return "Servidor JARVIS Activo", 200
 
+# Ruta para el saludo inicial
+@app.route('/inicio', methods=['GET'])
+def inicio():
+    try:
+        # Saludo que incluye lo que pediste
+        texto_saludo = "Claro señor, ¿qué desea hacer hoy, señor?"
+        
+        if os.path.exists(AUDIO_FILE):
+            os.remove(AUDIO_FILE)
+
+        asyncio.run(generar_voz_jarvis(texto_saludo, AUDIO_FILE))
+        
+        gc.collect()
+        return jsonify({"status": "ok", "respuesta": texto_saludo}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/asistente', methods=['POST'])
 def asistente():
     try:
@@ -85,10 +101,8 @@ def asistente():
         texto_raw = generar_texto_ia(pregunta)
         texto_respuesta = limpiar_texto(texto_raw)
         
-        # Eliminar previo
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
 
-        # Generar audio con edge-tts
         asyncio.run(generar_voz_jarvis(texto_respuesta, AUDIO_FILE))
         
         gc.collect()
