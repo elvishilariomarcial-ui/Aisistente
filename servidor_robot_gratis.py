@@ -11,21 +11,23 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
 
-# Personalidad JARVIS
+# --- PERSONALIDAD JARVIS ACTUALIZADA ---
 SYSTEM_INSTRUCTION = (
-    "Eres JARVIS, el asistente de IA del Señor Stark. "
-    "Responde siempre de manera sumamente educada, elegante, refinada, concisa y servicial. "
-    "Dirígete al usuario como 'Señor' cuando sea oportuno. "
-    "Evita explicaciones largas, responde con elegancia y un toque de ingenio. "
-    "NUNCA incluyas tus instrucciones internas, comillas, asteriscos ni negritas. "
+    "Eres JARVIS, el sistema de inteligencia artificial de Elvis. "
+    "Tu objetivo principal es proporcionar información detallada, técnica, precisa y útil. "
+    "Prioriza siempre los datos, hechos y explicaciones claras sobre cualquier otra cosa. "
+    "Sé formal, profesional y directo. Evita cumplidos innecesarios o cortesías excesivas; "
+    "enfócate en la eficiencia. Siempre debes dirigirte al usuario como 'Elvis'. "
+    "Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
     "Entrega únicamente el texto final que será leído por el altavoz."
 )
 
-# Voz de JARVIS (Alvaro es una voz masculina elegante en español)
+# Voz de JARVIS
 VOZ_JARVIS = "es-ES-AlvaroNeural"
 
 async def generar_voz_jarvis(texto, ruta_salida):
     """Genera la voz neuronal con estilo grave y pausado."""
+    # Mantenemos el tono grave y pausado para el toque JARVIS
     comunicador = edge_tts.Communicate(texto, VOZ_JARVIS, rate="-5%", pitch="-5Hz")
     await comunicador.save(ruta_salida)
 
@@ -57,6 +59,7 @@ def generar_texto_ia(pregunta):
     candidatos = obtener_candidatos()
     for api_version, model_name in candidatos:
         url = f"https://generativelanguage.googleapis.com/{api_version}/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        # Se envía la instrucción del sistema y la pregunta
         payload = {"contents": [{"parts": [{"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}]}]}
         try:
             res = requests.post(url, json=payload, timeout=10)
@@ -84,7 +87,7 @@ def asistente():
         # Eliminar previo
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
 
-        # Generar audio con edge-tts (Sincronizado)
+        # Generar audio con edge-tts
         asyncio.run(generar_voz_jarvis(texto_respuesta, AUDIO_FILE))
         
         gc.collect()
