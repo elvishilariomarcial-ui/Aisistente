@@ -1,6 +1,6 @@
 Flask
 requests
-gTTS
+edge-tts
 gunicorn
 
 
