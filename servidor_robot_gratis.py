@@ -1,7 +1,6 @@
 import os
 import re
 import gc
-import base64
 import requests
 import asyncio
 import edge_tts
@@ -25,9 +24,11 @@ SYSTEM_INSTRUCTION = (
     "Entrega únicamente el texto final que será leído por el altavoz."
 )
 
+# Voz de JARVIS
 VOZ_JARVIS = "es-ES-AlvaroNeural"
 
 async def generar_voz_jarvis(texto, ruta_salida):
+    """Genera la voz neuronal con estilo grave y pausado."""
     comunicador = edge_tts.Communicate(texto, VOZ_JARVIS, rate="-5%", pitch="-5Hz")
     await comunicador.save(ruta_salida)
 
@@ -54,31 +55,18 @@ def obtener_candidatos():
     candidatos.sort(key=lambda x: (0 if "flash" in x[1].lower() else 1, x[1]))
     return candidatos
 
-def generar_texto_ia(pregunta, imagen_bytes=None, mime_type="image/jpeg"):
+def generar_texto_ia(pregunta):
     if not GEMINI_API_KEY: raise Exception("Falta GEMINI_API_KEY")
     candidatos = obtener_candidatos()
-    
-    # Construir contenido (Texto + Imagen opcional)
-    parts = [{"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}]
-    if imagen_bytes:
-        b64_img = base64.b64encode(imagen_bytes).decode('utf-8')
-        parts.append({
-            "inline_data": {
-                "mime_type": mime_type,
-                "data": b64_img
-            }
-        })
-
-    payload = {"contents": [{"parts": parts}]}
-
     for api_version, model_name in candidatos:
         url = f"https://generativelanguage.googleapis.com/{api_version}/{model_name}:generateContent?key={GEMINI_API_KEY}"
+        payload = {"contents": [{"parts": [{"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}]}]}
         try:
-            res = requests.post(url, json=payload, timeout=15)
+            res = requests.post(url, json=payload, timeout=10)
             data = res.json()
             if res.status_code == 200:
-                parts_res = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                if parts_res: return parts_res[0].get("text", "").strip()
+                parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                if parts: return parts[0].get("text", "").strip()
         except: continue
     raise Exception("Error al generar texto")
 
@@ -86,12 +74,18 @@ def generar_texto_ia(pregunta, imagen_bytes=None, mime_type="image/jpeg"):
 def index():
     return "Servidor JARVIS Activo", 200
 
+# Ruta para el saludo inicial
 @app.route('/inicio', methods=['GET'])
 def inicio():
     try:
+        # Saludo que incluye lo que pediste
         texto_saludo = "Claro señor, ¿qué desea hacer hoy, señor?"
-        if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
+        
+        if os.path.exists(AUDIO_FILE):
+            os.remove(AUDIO_FILE)
+
         asyncio.run(generar_voz_jarvis(texto_saludo, AUDIO_FILE))
+        
         gc.collect()
         return jsonify({"status": "ok", "respuesta": texto_saludo}), 200
     except Exception as e:
@@ -100,21 +94,11 @@ def inicio():
 @app.route('/asistente', methods=['POST'])
 def asistente():
     try:
-        pregunta = None
-        imagen_bytes = None
-
-        # Soporte para multipart/form-data (ESP32 con foto) y JSON
-        if request.content_type and 'multipart/form-data' in request.content_type:
-            pregunta = request.form.get('pregunta', '')
-            if 'image' in request.files:
-                imagen_bytes = request.files['image'].read()
-        else:
-            data = request.get_json() or {}
-            pregunta = data.get('pregunta', '')
-
+        data = request.get_json() or {}
+        pregunta = data.get('pregunta', '')
         if not pregunta: return jsonify({"error": "Sin pregunta"}), 400
 
-        texto_raw = generar_texto_ia(pregunta, imagen_bytes=imagen_bytes)
+        texto_raw = generar_texto_ia(pregunta)
         texto_respuesta = limpiar_texto(texto_raw)
         
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
