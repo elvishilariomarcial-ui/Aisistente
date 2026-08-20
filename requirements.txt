@@ -2,9 +2,4 @@ flask
 flask-cors
 requests
 edge-tts
-gradio_client
-werkzeug
 gunicorn 
-
-
-
