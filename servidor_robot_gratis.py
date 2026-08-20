@@ -5,11 +5,20 @@ import requests
 import asyncio
 import edge_tts
 from flask import Flask, request, jsonify, send_file
+from gradio_client import Client
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
+
+# --- CLIENTE DE IA 3D (TripoSR - Hugging Face) ---
+try:
+    client_3d = Client("stabilityai/TripoSR")
+except Exception as e:
+    client_3d = None
+    print(f"Advertencia: No se pudo conectar con TripoSR: {e}")
 
 # --- PERSONALIDAD Y REGLAS DE JARVIS ---
 SYSTEM_INSTRUCTION = (
@@ -78,7 +87,6 @@ def index():
 @app.route('/inicio', methods=['GET'])
 def inicio():
     try:
-        # Saludo que incluye lo que pediste
         texto_saludo = "Claro señor, ¿qué desea hacer hoy, señor?"
         
         if os.path.exists(AUDIO_FILE):
@@ -115,6 +123,38 @@ def audio():
     if os.path.exists(AUDIO_FILE):
         return send_file(AUDIO_FILE, mimetype="audio/mpeg")
     return jsonify({"error": "Audio no listo"}), 404
+
+# --- NUEVA RUTA: GENERACIÓN 3D DESDE FOTO ---
+@app.route('/generar-3d', methods=['POST'])
+def generar_3d():
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No se envió ninguna foto"}), 400
+
+        if not client_3d:
+            return jsonify({"error": "Servicio 3D no inicializado"}), 500
+
+        file = request.files['file']
+        filename = secure_filename(file.filename)
+        path_temp = os.path.join("/tmp", filename)
+        file.save(path_temp)
+
+        # Petición a Hugging Face
+        resultado = client_3d.predict(
+            image=path_temp,
+            do_remove_background=True,
+            target_poly_count=2000,
+            api_name="/generate"
+        )
+
+        if os.path.exists(path_temp):
+            os.remove(path_temp)
+
+        model_url = resultado[0]
+        return jsonify({"status": "ok", "model_url": model_url}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
