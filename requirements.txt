@@ -1,8 +1,10 @@
-Flask
+flask
+flask-cors
 requests
 edge-tts
-gunicorn
 gradio_client
+werkzeug
+gunicorn 
 
 
 
