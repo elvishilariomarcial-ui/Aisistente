@@ -5,22 +5,22 @@ import requests
 import asyncio
 import edge_tts
 from flask import Flask, request, jsonify, send_file
+from flask_cors import CORS
 from gradio_client import Client
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
+CORS(app)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
 
-# --- CLIENTE DE IA 3D (TripoSR - Hugging Face) ---
 try:
     client_3d = Client("stabilityai/TripoSR")
 except Exception as e:
     client_3d = None
     print(f"Advertencia: No se pudo conectar con TripoSR: {e}")
 
-# --- PERSONALIDAD Y REGLAS DE JARVIS ---
 SYSTEM_INSTRUCTION = (
     "Eres JARVIS, el sistema de inteligencia artificial del Señor. "
     "Tu objetivo es proporcionar información detallada, técnica, precisa y útil. "
@@ -33,11 +33,9 @@ SYSTEM_INSTRUCTION = (
     "Entrega únicamente el texto final que será leído por el altavoz."
 )
 
-# Voz de JARVIS
 VOZ_JARVIS = "es-ES-AlvaroNeural"
 
 async def generar_voz_jarvis(texto, ruta_salida):
-    """Genera la voz neuronal con estilo grave y pausado."""
     comunicador = edge_tts.Communicate(texto, VOZ_JARVIS, rate="-5%", pitch="-5Hz")
     await comunicador.save(ruta_salida)
 
@@ -83,17 +81,12 @@ def generar_texto_ia(pregunta):
 def index():
     return "Servidor JARVIS Activo", 200
 
-# Ruta para el saludo inicial
 @app.route('/inicio', methods=['GET'])
 def inicio():
     try:
         texto_saludo = "Claro señor, ¿qué desea hacer hoy, señor?"
-        
-        if os.path.exists(AUDIO_FILE):
-            os.remove(AUDIO_FILE)
-
+        if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
         asyncio.run(generar_voz_jarvis(texto_saludo, AUDIO_FILE))
-        
         gc.collect()
         return jsonify({"status": "ok", "respuesta": texto_saludo}), 200
     except Exception as e:
@@ -112,7 +105,6 @@ def asistente():
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
 
         asyncio.run(generar_voz_jarvis(texto_respuesta, AUDIO_FILE))
-        
         gc.collect()
         return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
     except Exception as e:
@@ -124,7 +116,6 @@ def audio():
         return send_file(AUDIO_FILE, mimetype="audio/mpeg")
     return jsonify({"error": "Audio no listo"}), 404
 
-# --- NUEVA RUTA: GENERACIÓN 3D DESDE FOTO ---
 @app.route('/generar-3d', methods=['POST'])
 def generar_3d():
     try:
@@ -139,7 +130,6 @@ def generar_3d():
         path_temp = os.path.join("/tmp", filename)
         file.save(path_temp)
 
-        # Petición a Hugging Face
         resultado = client_3d.predict(
             image=path_temp,
             do_remove_background=True,
@@ -147,8 +137,7 @@ def generar_3d():
             api_name="/generate"
         )
 
-        if os.path.exists(path_temp):
-            os.remove(path_temp)
+        if os.path.exists(path_temp): os.remove(path_temp)
 
         model_url = resultado[0]
         return jsonify({"status": "ok", "model_url": model_url}), 200
