@@ -24,7 +24,6 @@ SYSTEM_INSTRUCTION = (
     "4. Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
     "Entrega únicamente el texto final que será leído por el altavoz."
     "no digas distancia actual si el usuario no la pide"
-    "no digas la hora si el usuario no la pide"
 )
 
 VOZ_JARVIS = "es-ES-AlvaroNeural"
