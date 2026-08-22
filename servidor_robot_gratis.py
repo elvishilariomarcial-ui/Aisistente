@@ -16,14 +16,16 @@ AUDIO_FILE = "respuesta.mp3"
 SYSTEM_INSTRUCTION = (
     "Eres JARVIS, el sistema de inteligencia artificial del Señor. "
     "Tu objetivo es proporcionar información detallada, técnica, precisa y útil. "
-    "Reglas strictly de formato: "
+    "Reglas estrictas de formato: "
     "1. Dirígete al usuario siempre como 'señor'. "
     "2. REGLA CONDICIONAL: Si la pregunta del usuario comienza con la palabra 'puedes' y tu respuesta es afirmativa, "
     "tu respuesta debe comenzar obligatoriamente con la frase 'Claro señor, ' seguida de la explicación. "
     "3. En el resto de los casos, responde de manera directa y profesional. "
-    "4. Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
+    "4. REGLA DE LONGITUD OBLIGATORIA: Todas tus respuestas deben tener una longitud MÍNIMA de 15 palabras para asegurar "
+    "el correcto procesamiento del sintetizador de voz. Si la respuesta es corta, extiéndela cortésmente (ejemplo: en vez de "
+    "'Son las 10:30 AM, señor', di 'En este momento son exactamente las 10 de la mañana con 30 minutos, señor. ¿Desea realizar alguna otra consulta?'). "
+    "5. Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
     "Entrega únicamente el texto final que será leído por el altavoz."
-    "no digas distancia actual si el usuario no la pide"
 )
 
 VOZ_JARVIS = "es-ES-AlvaroNeural"
@@ -106,7 +108,13 @@ def asistente():
 @app.route('/audio', methods=['GET'])
 def audio():
     if os.path.exists(AUDIO_FILE):
-        return send_file(AUDIO_FILE, mimetype="audio/mpeg")
+        file_size = os.path.getsize(AUDIO_FILE)
+        response = send_file(AUDIO_FILE, mimetype="audio/mpeg")
+        response.headers["Content-Length"] = str(file_size)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     return jsonify({"error": "Audio no listo"}), 404
 
 if __name__ == '__main__':
