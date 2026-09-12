@@ -10,7 +10,8 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# Utiliza Groq API Key (puedes guardarla en Render con este nombre o GEMINI_API_KEY)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
 
 SYSTEM_INSTRUCTION = (
@@ -39,45 +40,37 @@ def limpiar_texto(texto):
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
     return texto_limpio.strip()
 
-def generar_texto_ia(pregunta, imagen_b64=None):
-    if not GEMINI_API_KEY: 
-        raise Exception("Falta configurar GEMINI_API_KEY en las variables de entorno de Render")
+def generar_texto_ia(pregunta):
+    if not GROQ_API_KEY: 
+        raise Exception("Falta la clave de API de Groq (GROQ_API_KEY)")
     
-    # URL directa y estable para gemini-1.5-flash (evita búsquedas lentas y errores 500)
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
-    parts = [{"text": f"{SYSTEM_INSTRUCTION}\n\nPregunta: {pregunta}"}]
-    
-    # Si el ESP32 envió una imagen en Base64, se adjunta al payload para análisis visual
-    if imagen_b64:
-        parts.append({
-            "inline_data": {
-                "mime_type": "image/jpeg",
-                "data": imagen_b64
-            }
-        })
-        
-    payload = {"contents": [{"parts": parts}]}
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [
+            {"role": "system", "content": SYSTEM_INSTRUCTION},
+            {"role": "user", "content": pregunta}
+        ],
+        "temperature": 0.7
+    }
     
     try:
-        res = requests.post(url, json=payload, timeout=25)
-        data = res.json()
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
         if res.status_code == 200:
-            candidates = data.get("candidates", [])
-            if candidates:
-                parts_res = candidates[0].get("content", {}).get("parts", [])
-                if parts_res:
-                    return parts_res[0].get("text", "").strip()
-            raise Exception(f"Estructura inesperada en la respuesta de Gemini: {data}")
+            data = res.json()
+            return data["choices"][0]["message"]["content"].strip()
         else:
-            raise Exception(f"Error en la API de Google ({res.status_code}): {res.text}")
+            raise Exception(f"Error en API de Groq ({res.status_code}): {res.text}")
     except Exception as e:
-        print(f"Error detallado al generar texto con IA: {str(e)}")
-        raise e
+        raise Exception(f"Error al conectar con Groq: {e}")
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Servidor JARVIS Activo", 200
+    return "Servidor JARVIS Activo (Groq)", 200
 
 @app.route('/inicio', methods=['GET'])
 def inicio():
@@ -95,13 +88,9 @@ def asistente():
     try:
         data = request.get_json() or {}
         pregunta = data.get('pregunta', '')
-        imagen_b64 = data.get('imagen', '')
-        
-        if not pregunta: 
-            return jsonify({"error": "Sin pregunta"}), 400
+        if not pregunta: return jsonify({"error": "Sin pregunta"}), 400
 
-        # Enviamos la pregunta y la imagen capturada al modelo de IA
-        texto_raw = generar_texto_ia(pregunta, imagen_b64)
+        texto_raw = generar_texto_ia(pregunta)
         texto_respuesta = limpiar_texto(texto_raw)
         
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
@@ -110,7 +99,6 @@ def asistente():
         gc.collect()
         return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
     except Exception as e:
-        print(f"Error crítico en /asistente: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/audio', methods=['GET'])
