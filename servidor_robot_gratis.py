@@ -3,6 +3,7 @@ import re
 import gc
 import requests
 import asyncio
+import traceback
 import edge_tts
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
@@ -10,7 +11,6 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Utiliza Groq API Key (puedes guardarla en Render con este nombre o GEMINI_API_KEY)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GEMINI_API_KEY")
 AUDIO_FILE = "respuesta.mp3"
 
@@ -81,6 +81,7 @@ def inicio():
         gc.collect()
         return jsonify({"status": "ok", "respuesta": texto_saludo}), 200
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/asistente', methods=['POST'])
@@ -99,6 +100,7 @@ def asistente():
         gc.collect()
         return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
     except Exception as e:
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 @app.route('/audio', methods=['GET'])
