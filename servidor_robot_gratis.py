@@ -14,7 +14,6 @@ CORS(app)
 # LEER ÚNICAMENTE LA CLAVE DE GROQ
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# Diagnóstico temporal en consola para verificar si Render cargó la llave
 if GROQ_API_KEY:
     print(f"DEBUG: GROQ_API_KEY detectada correctamente (longitud: {len(GROQ_API_KEY)}, inicia con: {GROQ_API_KEY[:6]}...)")
 else:
@@ -58,11 +57,12 @@ def generar_texto_ia(pregunta):
         "Content-Type": "application/json"
     }
     
-    # Lista actualizada de modelos compatibles en Groq
+    # Lista actualizada de modelos vigentes en Groq con respaldo automático
     modelos_disponibles = [
+        "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
-        "llama-4-scout",
-        "mixtral-8x7b-32768"
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b"
     ]
     
     for modelo in modelos_disponibles:
@@ -85,7 +85,7 @@ def generar_texto_ia(pregunta):
             print(f"Error al intentar con el modelo {modelo}: {e}, probando siguiente...")
             continue
             
-    raise Exception("Error al generar texto: Ninguno de los modelos de Groq respondió correctamente. Verifica tu API Key.")
+    raise Exception("Error al generar texto: Ninguno de los modelos de Groq respondió correctamente.")
 
 @app.route('/', methods=['GET'])
 def index():
