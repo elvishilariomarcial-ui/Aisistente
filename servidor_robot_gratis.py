@@ -49,28 +49,39 @@ def generar_texto_ia(pregunta):
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [
-            {"role": "system", "content": SYSTEM_INSTRUCTION},
-            {"role": "user", "content": pregunta}
-        ],
-        "temperature": 0.7
-    }
     
-    try:
-        res = requests.post(url, json=payload, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            return data["choices"][0]["message"]["content"].strip()
-        else:
-            raise Exception(f"Error en API de Groq ({res.status_code}): {res.text}")
-    except Exception as e:
-        raise Exception(f"Error al conectar con Groq: {e}")
+    # Lista de modelos en orden de preferencia para buscar respaldos automáticos
+    modelos_disponibles = [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "mixtral-8x7b-32768"
+    ]
+    
+    for modelo in modelos_disponibles:
+        payload = {
+            "model": modelo,
+            "messages": [
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": pregunta}
+            ],
+            "temperature": 0.7
+        }
+        try:
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                return data["choices"][0]["message"]["content"].strip()
+            else:
+                print(f"Modelo {modelo} falló con código {res.status_code}, probando siguiente...")
+        except Exception as e:
+            print(f"Error al intentar con el modelo {modelo}: {e}, probando siguiente...")
+            continue
+            
+    raise Exception("Error al generar texto: Ninguno de los modelos de Groq respondió correctamente.")
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Servidor JARVIS Activo (Groq)", 200
+    return "Servidor JARVIS Activo (Groq con Respaldo)", 200
 
 @app.route('/inicio', methods=['GET'])
 def inicio():
