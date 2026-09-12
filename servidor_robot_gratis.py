@@ -11,7 +11,15 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY") or os.environ.get("GEMINI_API_KEY")
+# LEER ÚNICAMENTE LA CLAVE DE GROQ
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+
+# Diagnóstico temporal en consola para verificar si Render cargó la llave
+if GROQ_API_KEY:
+    print(f"DEBUG: GROQ_API_KEY detectada correctamente (longitud: {len(GROQ_API_KEY)}, inicia con: {GROQ_API_KEY[:6]}...)")
+else:
+    print("DEBUG: ¡ATENCIÓN! GROQ_API_KEY no está configurada o está vacía en Render.")
+
 AUDIO_FILE = "respuesta.mp3"
 
 SYSTEM_INSTRUCTION = (
@@ -42,7 +50,7 @@ def limpiar_texto(texto):
 
 def generar_texto_ia(pregunta):
     if not GROQ_API_KEY: 
-        raise Exception("Falta la clave de API de Groq (GROQ_API_KEY)")
+        raise Exception("Falta la clave de API de Groq en las variables de entorno de Render (GROQ_API_KEY)")
     
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -50,10 +58,10 @@ def generar_texto_ia(pregunta):
         "Content-Type": "application/json"
     }
     
-    # Lista de modelos en orden de preferencia para buscar respaldos automáticos
+    # Lista actualizada de modelos compatibles en Groq
     modelos_disponibles = [
         "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
+        "llama-4-scout",
         "mixtral-8x7b-32768"
     ]
     
@@ -72,16 +80,16 @@ def generar_texto_ia(pregunta):
                 data = res.json()
                 return data["choices"][0]["message"]["content"].strip()
             else:
-                print(f"Modelo {modelo} falló con código {res.status_code}, probando siguiente...")
+                print(f"Modelo {modelo} falló con código {res.status_code}: {res.text[:100]}, probando siguiente...")
         except Exception as e:
             print(f"Error al intentar con el modelo {modelo}: {e}, probando siguiente...")
             continue
             
-    raise Exception("Error al generar texto: Ninguno de los modelos de Groq respondió correctamente.")
+    raise Exception("Error al generar texto: Ninguno de los modelos de Groq respondió correctamente. Verifica tu API Key.")
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Servidor JARVIS Activo (Groq con Respaldo)", 200
+    return "Servidor JARVIS Activo (Groq)", 200
 
 @app.route('/inicio', methods=['GET'])
 def inicio():
