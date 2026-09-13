@@ -47,6 +47,20 @@ def limpiar_texto(texto):
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
     return texto_limpio.strip()
 
+def transcribir_audio_groq(ruta_audio):
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+    
+    with open(ruta_audio, "rb") as f:
+        files = {"file": (ruta_audio, f, "audio/wav")}
+        data = {"model": "whisper-large-v3"}
+        res = requests.post(url, headers=headers, files=files, data=data, timeout=15)
+        
+    if res.status_code == 200:
+        return res.json().get("text", "").strip()
+    else:
+        raise Exception(f"Error en transcripción de Groq ({res.status_code}): {res.text}")
+
 def generar_texto_ia(pregunta):
     if not GROQ_API_KEY: 
         raise Exception("Falta la clave de API de Groq en las variables de entorno de Render (GROQ_API_KEY)")
@@ -57,7 +71,6 @@ def generar_texto_ia(pregunta):
         "Content-Type": "application/json"
     }
     
-    # Lista actualizada de modelos vigentes en Groq con respaldo automático
     modelos_disponibles = [
         "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
@@ -106,18 +119,31 @@ def inicio():
 @app.route('/asistente', methods=['POST'])
 def asistente():
     try:
-        data = request.get_json() or {}
-        pregunta = data.get('pregunta', '')
-        if not pregunta: return jsonify({"error": "Sin pregunta"}), 400
+        texto_pregunta = ""
+        
+        # Validación robusta para evitar errores 415 o fallos por peticiones vacías
+        if request.files and 'audio' in request.files:
+            audio_file = request.files['audio']
+            if audio_file.filename != '':
+                temp_path = "temp_input.wav"
+                audio_file.save(temp_path)
+                texto_pregunta = transcribir_audio_groq(temp_path)
+                if os.path.exists(temp_path): os.remove(temp_path)
+        elif request.is_json:
+            data = request.get_json() or {}
+            texto_pregunta = data.get('pregunta', '')
 
-        texto_raw = generar_texto_ia(pregunta)
+        if not texto_pregunta: 
+            return jsonify({"error": "Petición vacía o sin audio válido"}), 400
+
+        texto_raw = generar_texto_ia(texto_pregunta)
         texto_respuesta = limpiar_texto(texto_raw)
         
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
 
         asyncio.run(generar_voz_jarvis(texto_respuesta, AUDIO_FILE))
         gc.collect()
-        return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
+        return jsonify({"status": "ok", "pregunta_detectada": texto_pregunta, "respuesta": texto_respuesta}), 200
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
