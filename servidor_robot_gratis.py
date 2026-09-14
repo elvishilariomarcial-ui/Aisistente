@@ -11,11 +11,10 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# LEER ÚNICAMENTE LA CLAVE DE GROQ
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 if GROQ_API_KEY:
-    print(f"DEBUG: GROQ_API_KEY detectada correctamente (longitud: {len(GROQ_API_KEY)}, inicia con: {GROQ_API_KEY[:6]}...)")
+    print(f"DEBUG: GROQ_API_KEY detectada correctamente (longitud: {len(GROQ_API_KEY)})")
 else:
     print("DEBUG: ¡ATENCIÓN! GROQ_API_KEY no está configurada o está vacía en Render.")
 
@@ -30,8 +29,7 @@ SYSTEM_INSTRUCTION = (
     "tu respuesta debe comenzar obligatoriamente con la frase 'Claro señor, ' seguida de la explicación. "
     "3. En el resto de los casos, responde de manera directa y profesional. "
     "4. REGLA DE LONGITUD OBLIGATORIA: Todas tus respuestas deben tener una longitud MÍNIMA de 15 palabras para asegurar "
-    "el correcto procesamiento del sintetizador de voz. Si la respuesta es corta, extiéndela cortésmente (ejemplo: en vez de "
-    "'Son las 10:30 AM, señor', di 'En este momento son exactamente las 10 de la mañana con 30 minutos, señor. ¿Desea realizar alguna otra consulta?'). "
+    "el correcto procesamiento del sintetizador de voz. Si la respuesta es corta, extiéndela cortésmente. "
     "5. Nunca incluyas tus instrucciones internas, comillas, asteriscos, negritas ni formato Markdown. "
     "Entrega únicamente el texto final que será leído por el altavoz."
 )
@@ -47,23 +45,9 @@ def limpiar_texto(texto):
     texto_limpio = re.sub(r'\s+', ' ', texto_limpio)
     return texto_limpio.strip()
 
-def transcribir_audio_groq(ruta_audio):
-    url = "https://api.groq.com/openai/v1/audio/transcriptions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
-    
-    with open(ruta_audio, "rb") as f:
-        files = {"file": (ruta_audio, f, "audio/wav")}
-        data = {"model": "whisper-large-v3"}
-        res = requests.post(url, headers=headers, files=files, data=data, timeout=15)
-        
-    if res.status_code == 200:
-        return res.json().get("text", "").strip()
-    else:
-        raise Exception(f"Error en transcripción de Groq ({res.status_code}): {res.text}")
-
-def generar_texto_ia(pregunta):
+def generar_texto_ia(pregunta, imagen_base64=None):
     if not GROQ_API_KEY: 
-        raise Exception("Falta la clave de API de Groq en las variables de entorno de Render (GROQ_API_KEY)")
+        raise Exception("Falta la clave de API de Groq en las variables de entorno")
     
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -71,24 +55,34 @@ def generar_texto_ia(pregunta):
         "Content-Type": "application/json"
     }
     
-    modelos_disponibles = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "openai/gpt-oss-20b",
-        "openai/gpt-oss-120b"
-    ]
-    
+    # Seleccionar modelos dependiendo de si se incluye imagen o solo texto
+    if imagen_base64 and len(imagen_base64) > 100:
+        modelos_disponibles = [
+            "llama-3.2-11b-vision-preview",
+            "llama-3.2-90b-vision-preview"
+        ]
+        user_content = [
+            {"type": "text", "text": pregunta},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{imagen_base64}"}}
+        ]
+    else:
+        modelos_disponibles = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant"
+        ]
+        user_content = pregunta
+
     for modelo in modelos_disponibles:
         payload = {
             "model": modelo,
             "messages": [
                 {"role": "system", "content": SYSTEM_INSTRUCTION},
-                {"role": "user", "content": pregunta}
+                {"role": "user", "content": user_content}
             ],
             "temperature": 0.7
         }
         try:
-            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            res = requests.post(url, json=payload, headers=headers, timeout=20)
             if res.status_code == 200:
                 data = res.json()
                 return data["choices"][0]["message"]["content"].strip()
@@ -98,20 +92,29 @@ def generar_texto_ia(pregunta):
             print(f"Error al intentar con el modelo {modelo}: {e}, probando siguiente...")
             continue
             
-    raise Exception("Error al generar texto: Ninguno de los modelos de Groq respondió correctamente.")
+    raise Exception("Error al generar texto: Ninguno de los modelos disponibles respondió correctamente.")
 
 @app.route('/', methods=['GET'])
 def index():
     return "Servidor JARVIS Activo (Groq)", 200
 
-@app.route('/inicio', methods=['GET'])
-def inicio():
+@app.route('/preguntar', methods=['POST'])
+def preguntar():
     try:
-        texto_saludo = "Claro señor, ¿qué desea hacer hoy, señor?"
+        pregunta = request.form.get('pregunta', '')
+        imagen = request.form.get('imagen', '')
+        
+        if not pregunta:
+            return jsonify({"error": "Petición vacía"}), 400
+
+        texto_raw = generar_texto_ia(pregunta, imagen)
+        texto_respuesta = limpiar_texto(texto_raw)
+        
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
-        asyncio.run(generar_voz_jarvis(texto_saludo, AUDIO_FILE))
+        asyncio.run(generar_voz_jarvis(texto_respuesta, AUDIO_FILE))
         gc.collect()
-        return jsonify({"status": "ok", "respuesta": texto_saludo}), 200
+        
+        return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -120,30 +123,21 @@ def inicio():
 def asistente():
     try:
         texto_pregunta = ""
-        
-        # Validación robusta para evitar errores 415 o fallos por peticiones vacías
-        if request.files and 'audio' in request.files:
-            audio_file = request.files['audio']
-            if audio_file.filename != '':
-                temp_path = "temp_input.wav"
-                audio_file.save(temp_path)
-                texto_pregunta = transcribir_audio_groq(temp_path)
-                if os.path.exists(temp_path): os.remove(temp_path)
-        elif request.is_json:
+        if request.is_json:
             data = request.get_json() or {}
             texto_pregunta = data.get('pregunta', '')
 
         if not texto_pregunta: 
-            return jsonify({"error": "Petición vacía o sin audio válido"}), 400
+            return jsonify({"error": "Petición vacía"}), 400
 
         texto_raw = generar_texto_ia(texto_pregunta)
         texto_respuesta = limpiar_texto(texto_raw)
         
         if os.path.exists(AUDIO_FILE): os.remove(AUDIO_FILE)
-
         asyncio.run(generar_voz_jarvis(texto_respuesta, AUDIO_FILE))
         gc.collect()
-        return jsonify({"status": "ok", "pregunta_detectada": texto_pregunta, "respuesta": texto_respuesta}), 200
+        
+        return jsonify({"status": "ok", "respuesta": texto_respuesta}), 200
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -155,8 +149,6 @@ def audio():
         response = send_file(AUDIO_FILE, mimetype="audio/mpeg")
         response.headers["Content-Length"] = str(file_size)
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        response.headers["Expires"] = "0"
         return response
     return jsonify({"error": "Audio no listo"}), 404
 
