@@ -55,11 +55,12 @@ def generar_texto_ia(pregunta, imagen_base64=None):
         "Content-Type": "application/json"
     }
     
-    # Seleccionar modelos dependiendo de si se incluye imagen o solo texto
+    # Modelos actualizados y vigentes en Groq
     if imagen_base64 and len(imagen_base64) > 100:
         modelos_disponibles = [
             "llama-3.2-11b-vision-preview",
-            "llama-3.2-90b-vision-preview"
+            "llama-3.2-90b-vision-preview",
+            "openai/gpt-oss-120b"
         ]
         user_content = [
             {"type": "text", "text": pregunta},
@@ -67,6 +68,8 @@ def generar_texto_ia(pregunta, imagen_base64=None):
         ]
     else:
         modelos_disponibles = [
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant"
         ]
